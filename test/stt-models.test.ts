@@ -2,8 +2,11 @@ import { afterAll, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import {
   ModelManager,
+  downloadModel,
+  sha256Bytes,
   sha256File,
   verifyOnDisk,
   type ModelCatalog,
@@ -57,6 +60,31 @@ describe("model checksum on disk (5.2)", () => {
     expect(verifyOnDisk(good)).toBe("corrupt");
 
     expect(verifyOnDisk({ language: "en", path: join(dir, "nope.bin"), sha256: "x" })).toBe("missing");
+  });
+});
+
+describe("model download with checksum (5.2)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "stt-dl-"));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("writes the file only when the downloaded bytes match the checksum", async () => {
+    const bytes = new TextEncoder().encode("good-model");
+    const path = join(dir, "sub/ru.bin");
+    const spec: ModelSpec = { language: "ru", path, sha256: sha256Bytes(bytes) };
+    const m = new ModelManager({ ...catalog, ru: spec });
+
+    expect(await m.download("ru", async () => bytes)).toBe("ok");
+    expect(readFileSync(path)).toEqual(Buffer.from(bytes));
+    expect(m.status("ru")).toBe("ok");
+    expect(m.load("ru").language).toBe("ru");
+  });
+
+  it("rejects a tampered download and writes nothing", async () => {
+    const path = join(dir, "en.bin");
+    const spec: ModelSpec = { language: "en", path, sha256: sha256Bytes(new TextEncoder().encode("real")) };
+    const status = await downloadModel(spec, async () => new TextEncoder().encode("fake"));
+    expect(status).toBe("corrupt");
+    expect(verifyOnDisk(spec)).toBe("missing");
   });
 });
 

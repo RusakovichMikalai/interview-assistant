@@ -30,7 +30,7 @@
 ## 5. Speech recognition
 
 - [ ] 5.1 STT utility process with sherpa-onnx, Silero VAD, partial and final events; verify: test on recorded audio, final within 500 ms on reference hardware
-- [ ] 5.2 Model download with checksum and per-language loading; verify: test that only the selected model is loaded and start is blocked when missing
+- [x] 5.2 Model download with checksum and per-language loading; verify: test that only the selected model is loaded and start is blocked when missing
 - [x] 5.3 Interviewer-channel priority scheduling; verify: load test with both channels, interviewer finals not delayed
 - [ ] 5.4 Offline check; verify: session with network disabled keeps transcribing
 
@@ -42,7 +42,7 @@
 - [x] 6.4 Router: health states, failover on limit and error, LIMITED until reset; verify: unit tests for each transition with fake clocks
 - [x] 6.5 Hedging: adaptive threshold (800 ms start, p90 of 20, cap 1500 ms), first-token wins, loser abort, no mixing, SLOW after 3 lost races for 5 min; verify: unit tests with controllable fake adapters
 - [x] 6.6 Mandatory backup when subscription is primary; verify: test that session start is refused
-- [ ] 6.7 Source and health indicator in overlay; verify: UI test shows `SUB`, `API`, `API (limit)`
+- [x] 6.7 Source and health indicator in overlay; verify: UI test shows `SUB`, `API`, `API (limit)`
 - [x] 6.8 Fast/deep chains with hotkey switch; verify: test that next request uses the selected chain
 
 ## 7. Answer hints
@@ -65,7 +65,7 @@
 - [x] 9.1 Pairing by QR and 6-digit code, 5-min expiry, one-time use, key pinning; verify: unit tests for expiry and reuse
 - [ ] 9.2 mDNS discovery and manual IP; verify: manual test on LAN
 - [ ] 9.3 WebRTC with two Opus tracks, DTLS-SRTP, reject unpaired peers; verify: test that unpaired peer gets no media
-- [ ] 9.4 Link state, delay indicator, auto-reconnect, gap marker; verify: test with 10 s network drop
+- [x] 9.4 Link state, delay indicator, auto-reconnect, gap marker; verify: test with 10 s network drop
 
 ## 10. VIEWER-SOLO
 
