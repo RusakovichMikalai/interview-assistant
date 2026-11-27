@@ -17,7 +17,8 @@ import { createInterface } from "node:readline";
 import { appendFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-const REQUESTS = 5;
+const REQUESTS = Number(process.env.REQUESTS) || 5;
+const MODEL = process.env.MODEL || ""; // "" = CLI default; e.g. "sonnet" or "claude-haiku-5-5"
 const RAW = fileURLToPath(new URL("./raw.jsonl", import.meta.url)); // decode %XX for non-ASCII paths
 
 // ~2k-token cached prefix: a block the CLI caches, so repeat turns are warm.
@@ -67,6 +68,7 @@ async function live() {
       "--verbose",
       "--allowedTools", "Noop", // only a non-existent tool is allowed = tools off
       "--append-system-prompt", PREFIX,
+      ...(MODEL ? ["--model", MODEL] : []),
     ],
     { env: withoutApiKey(process.env), stdio: ["pipe", "pipe", "inherit"] },
   );

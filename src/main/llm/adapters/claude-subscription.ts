@@ -239,16 +239,18 @@ export function subscriptionEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.P
   return env;
 }
 
-// Force a fast, non-thinking model for the subscription path. `claude -p` defaults
-// to opus-5-5 with extended thinking (spike 1.4: TTFT p50 ~3160 ms, ~$0.25/req) -
-// far too slow and costly for live hints. Haiku is the fast tier (no extended
-// thinking, cheapest) and matches the HTTP claude preset's model, so the fallback
-// behaves like the primary. Override via realClaudeSpawn's `model` (e.g. "sonnet"
-// for deeper hints, or "" to let the CLI pick its default).
-export const SUBSCRIPTION_FAST_MODEL = "claude-haiku-5-5";
+// Force an explicit model on the subscription path. `claude -p` defaults to
+// opus-5-5 with extended thinking (spike 1.4: TTFT p50 ~3160 ms) - far too slow
+// for live hints. With thinking off, sonnet and haiku have the SAME warm TTFT
+// (spike 1.4 re-run: p50 189 vs 194 ms, p90 604 vs 599 ms over 4 warm turns) -
+// first-token latency is network/CLI bound, not model-bound. So the choice is
+// quality vs subscription-quota burn, not speed: default to sonnet for better
+// hint quality at equal latency; override to "claude-haiku-5-5" to conserve quota,
+// or "" to let the CLI pick its default.
+export const SUBSCRIPTION_MODEL = "claude-sonnet-5-5";
 
 /** CLI args for a `-p` stream-json subscription turn, with the model forced. */
-export function subscriptionArgs(model: string = SUBSCRIPTION_FAST_MODEL, extraArgs: string[] = []): string[] {
+export function subscriptionArgs(model: string = SUBSCRIPTION_MODEL, extraArgs: string[] = []): string[] {
   // --verbose is required by the CLI for `-p` with stream-json output.
   const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"];
   if (model) args.push("--model", model);
@@ -256,7 +258,7 @@ export function subscriptionArgs(model: string = SUBSCRIPTION_FAST_MODEL, extraA
 }
 
 /** Real spawn: a warm `claude -p` stream-json process, API key dropped from env. */
-export function realClaudeSpawn(command = "claude", model = SUBSCRIPTION_FAST_MODEL, extraArgs: string[] = []): SpawnFn {
+export function realClaudeSpawn(command = "claude", model = SUBSCRIPTION_MODEL, extraArgs: string[] = []): SpawnFn {
   return () => {
     // Lazy require keeps node:child_process out of the renderer/test import graph.
     const { spawn } = require("node:child_process") as typeof import("node:child_process");

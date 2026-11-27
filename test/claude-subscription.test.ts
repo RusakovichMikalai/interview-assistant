@@ -3,7 +3,7 @@ import {
   claudeSubscriptionAdapter,
   subscriptionArgs,
   subscriptionEnv,
-  SUBSCRIPTION_FAST_MODEL,
+  SUBSCRIPTION_MODEL,
   type ChildProc,
 } from "../src/main/llm/adapters/claude-subscription";
 import { AdapterError, LimitError, type LlmRequest } from "../src/shared/llm";
@@ -79,17 +79,17 @@ async function collect(tokens: AsyncIterable<string>): Promise<string[]> {
 const flush = () => new Promise<void>((r) => setImmediate(r));
 
 describe("subscriptionArgs (6.3)", () => {
-  it("forces the fast non-thinking model by default", () => {
+  it("forces the default non-thinking model by default", () => {
     const args = subscriptionArgs();
-    expect(SUBSCRIPTION_FAST_MODEL).toBe("claude-haiku-5-5");
+    expect(SUBSCRIPTION_MODEL).toBe("claude-sonnet-5-5");
     expect(args).toContain("--verbose"); // required for -p stream-json output
     const i = args.indexOf("--model");
     expect(i).toBeGreaterThanOrEqual(0);
-    expect(args[i + 1]).toBe(SUBSCRIPTION_FAST_MODEL);
+    expect(args[i + 1]).toBe(SUBSCRIPTION_MODEL);
   });
   it("overrides the model and appends extra args", () => {
-    expect(subscriptionArgs("sonnet", ["--foo"])).toEqual(
-      expect.arrayContaining(["--model", "sonnet", "--foo"]),
+    expect(subscriptionArgs("claude-haiku-5-5", ["--foo"])).toEqual(
+      expect.arrayContaining(["--model", "claude-haiku-5-5", "--foo"]),
     );
   });
   it("omits --model when the model is empty (CLI default)", () => {
