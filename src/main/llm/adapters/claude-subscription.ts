@@ -6,9 +6,15 @@ import { AdapterError, LimitError, type LlmAdapter, type LlmRequest, type Stream
 // (spec 6.3 "no silent API billing"). Turns are serial (one hint at a time), so
 // a single process is reused warm and restarted if it crashes.
 //
-// shortcut: the stream-json wire shapes below (request + event JSON) are our
-// provisional contract. The exact `claude -p` payloads and the limit/reset-time
-// format are pending spike 1.4; swap `encodeRequest`/`decodeEvent` once captured.
+// Wire shapes captured in spike 1.4 (openspec .../spikes/1.4.md): input is one
+// stream-json `user` message line; output is `assistant` messages (text in
+// content items), a terminal `result` event, and proactive `rate_limit_event`s
+// carrying `resetsAt` (epoch SECONDS) per window.
+//
+// shortcut: the per-request system/prefix is folded into the user text. A static
+// session prefix could instead be passed once via `--append-system-prompt` for
+// prompt caching (seen warming to ~31k cached tokens in the spike); upgrade when
+// the hints layer separates the static CV/vacancy prefix from the live turn.
 
 /** Minimal child-process surface, injectable so tests use a fake CLI. */
 export interface ChildProc {
@@ -37,28 +43,52 @@ type Event =
 
 function encodeRequest(req: LlmRequest): string {
   const context = [req.prefix, req.system].filter(Boolean).join("\n\n");
-  return JSON.stringify({ type: "user", system: context, turns: req.turns, question: req.question });
+  const history = req.turns.map((t) => `${t.role}: ${t.text}`).join("\n");
+  const text = [context, history, req.question].filter(Boolean).join("\n\n");
+  return JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text }] } });
 }
 
 function decodeEvent(line: string): Event {
+  let ev: {
+    type?: string;
+    message?: { content?: Array<{ type?: string; text?: string }> };
+    rate_limit_info?: { status?: string; resetsAt?: number };
+    is_error?: boolean;
+    result?: unknown;
+    api_error_status?: unknown;
+  };
   try {
-    const ev = JSON.parse(line) as Partial<Event> & { text?: string; message?: string; resetAt?: number };
-    switch (ev.type) {
-      case "text":
-        return { type: "text", text: ev.text ?? "" };
-      case "limit":
-        return { type: "limit", resetAt: ev.resetAt };
-      case "error":
-        return { type: "error", message: ev.message ?? "subscription error" };
-      case "login_required":
-        return { type: "login_required" };
-      case "done":
-        return { type: "done" };
-      default:
-        return { type: "other" };
-    }
+    ev = JSON.parse(line);
   } catch {
     return { type: "other" };
+  }
+  switch (ev.type) {
+    case "assistant": {
+      const text = (ev.message?.content ?? [])
+        .filter((c) => c?.type === "text" && c.text)
+        .map((c) => c.text)
+        .join("");
+      return text ? { type: "text", text } : { type: "other" };
+    }
+    case "rate_limit_event": {
+      const info = ev.rate_limit_info;
+      if (info?.status && info.status !== "allowed") {
+        // resetsAt is epoch seconds; LimitError.resetAt is epoch ms.
+        const resetAt = typeof info.resetsAt === "number" ? info.resetsAt * 1000 : undefined;
+        return { type: "limit", resetAt };
+      }
+      return { type: "other" };
+    }
+    case "result": {
+      if (ev.is_error) {
+        const msg = String(ev.result ?? ev.api_error_status ?? "subscription error");
+        if (/login|logged in|authenticat|unauthor|credential/i.test(msg)) return { type: "login_required" };
+        return { type: "error", message: msg };
+      }
+      return { type: "done" };
+    }
+    default:
+      return { type: "other" };
   }
 }
 
@@ -217,7 +247,8 @@ export function realClaudeSpawn(command = "claude", extraArgs: string[] = []): S
     const { createInterface } = require("node:readline") as typeof import("node:readline");
     const child = spawn(
       command,
-      ["-p", "--input-format", "stream-json", "--output-format", "stream-json", ...extraArgs],
+      // --verbose is required by the CLI for `-p` with stream-json output.
+      ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", ...extraArgs],
       { env: subscriptionEnv(), stdio: ["pipe", "pipe", "inherit"] },
     );
     const rl = createInterface({ input: child.stdout });

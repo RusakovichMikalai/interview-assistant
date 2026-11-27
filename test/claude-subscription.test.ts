@@ -8,6 +8,10 @@ import { AdapterError, LimitError, type LlmRequest } from "../src/shared/llm";
 
 const REQ: LlmRequest = { system: "s", turns: [], question: "q?" };
 
+// Real `claude -p` stream-json event shapes (captured in spike 1.4).
+const assistantText = (text: string) => ({ type: "assistant", message: { content: [{ type: "text", text }] } });
+const resultDone = () => ({ type: "result", subtype: "success", is_error: false, result: "ok" });
+
 // A fake `claude` CLI child whose output lines the test feeds by hand.
 function fakeChild() {
   const q: string[] = [];
@@ -87,12 +91,13 @@ describe("claude-subscription adapter (6.3)", () => {
     const a = claudeSubscriptionAdapter({ profileId: "sub", spawn: sp.spawn });
     const s = a.start(REQ);
     await flush();
-    sp.children[0].emit({ type: "text", text: "Hel" });
-    sp.children[0].emit({ type: "text", text: "lo" });
-    sp.children[0].emit({ type: "done" });
+    sp.children[0].emit(assistantText("Hel"));
+    sp.children[0].emit(assistantText("lo"));
+    sp.children[0].emit(resultDone());
     expect(await collect(s.tokens)).toEqual(["Hel", "lo"]);
     expect(sp.count).toBe(1); // warm: one process
-    expect(JSON.parse(sp.children[0].writes[0]).question).toBe("q?");
+    const sent = JSON.parse(sp.children[0].writes[0]);
+    expect(sent.message.content[0].text).toContain("q?");
   });
 
   it("reuses the same warm process for a second turn", async () => {
@@ -101,26 +106,38 @@ describe("claude-subscription adapter (6.3)", () => {
 
     const s1 = a.start(REQ);
     await flush();
-    sp.children[0].emit({ type: "text", text: "a" });
-    sp.children[0].emit({ type: "done" });
+    sp.children[0].emit(assistantText("a"));
+    sp.children[0].emit(resultDone());
     expect(await collect(s1.tokens)).toEqual(["a"]);
 
     const s2 = a.start(REQ);
     await flush();
-    sp.children[0].emit({ type: "text", text: "b" });
-    sp.children[0].emit({ type: "done" });
+    sp.children[0].emit(assistantText("b"));
+    sp.children[0].emit(resultDone());
     expect(await collect(s2.tokens)).toEqual(["b"]);
     expect(sp.count).toBe(1);
   });
 
-  it("maps a limit event to LimitError with resetAt", async () => {
+  it("ignores thinking-only and allowed rate-limit events, streams only text", async () => {
     const sp = spawner();
     const a = claudeSubscriptionAdapter({ profileId: "sub", spawn: sp.spawn });
     const s = a.start(REQ);
     await flush();
-    sp.children[0].emit({ type: "limit", resetAt: 42 });
+    sp.children[0].emit({ type: "assistant", message: { content: [{ type: "thinking", thinking: "..." }] } });
+    sp.children[0].emit({ type: "rate_limit_event", rate_limit_info: { status: "allowed", resetsAt: 1795796400 } });
+    sp.children[0].emit(assistantText("hi"));
+    sp.children[0].emit(resultDone());
+    expect(await collect(s.tokens)).toEqual(["hi"]);
+  });
+
+  it("maps a rate_limit_event (status != allowed) to LimitError with ms resetAt", async () => {
+    const sp = spawner();
+    const a = claudeSubscriptionAdapter({ profileId: "sub", spawn: sp.spawn });
+    const s = a.start(REQ);
+    await flush();
+    sp.children[0].emit({ type: "rate_limit_event", rate_limit_info: { status: "rejected", resetsAt: 42 } });
     await expect(collect(s.tokens)).rejects.toSatisfy(
-      (e: unknown) => e instanceof LimitError && e.resetAt === 42,
+      (e: unknown) => e instanceof LimitError && e.resetAt === 42000,
     );
   });
 
@@ -129,7 +146,7 @@ describe("claude-subscription adapter (6.3)", () => {
     const a = claudeSubscriptionAdapter({ profileId: "sub", spawn: sp.spawn });
     const s = a.start(REQ);
     await flush();
-    sp.children[0].emit({ type: "login_required" });
+    sp.children[0].emit({ type: "result", is_error: true, result: "Please run /login to authenticate" });
     await expect(collect(s.tokens)).rejects.toBeInstanceOf(AdapterError);
 
     // Second turn short-circuits; no new process is spawned.
@@ -150,8 +167,8 @@ describe("claude-subscription adapter (6.3)", () => {
 
     const s2 = a.start(REQ);
     await flush();
-    sp.children[1].emit({ type: "text", text: "back" });
-    sp.children[1].emit({ type: "done" });
+    sp.children[1].emit(assistantText("back"));
+    sp.children[1].emit(resultDone());
     expect(await collect(s2.tokens)).toEqual(["back"]);
   });
 });
