@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   claudeSubscriptionAdapter,
+  subscriptionArgs,
   subscriptionEnv,
+  SUBSCRIPTION_FAST_MODEL,
   type ChildProc,
 } from "../src/main/llm/adapters/claude-subscription";
 import { AdapterError, LimitError, type LlmRequest } from "../src/shared/llm";
@@ -75,6 +77,25 @@ async function collect(tokens: AsyncIterable<string>): Promise<string[]> {
   return out;
 }
 const flush = () => new Promise<void>((r) => setImmediate(r));
+
+describe("subscriptionArgs (6.3)", () => {
+  it("forces the fast non-thinking model by default", () => {
+    const args = subscriptionArgs();
+    expect(SUBSCRIPTION_FAST_MODEL).toBe("claude-haiku-5-5");
+    expect(args).toContain("--verbose"); // required for -p stream-json output
+    const i = args.indexOf("--model");
+    expect(i).toBeGreaterThanOrEqual(0);
+    expect(args[i + 1]).toBe(SUBSCRIPTION_FAST_MODEL);
+  });
+  it("overrides the model and appends extra args", () => {
+    expect(subscriptionArgs("sonnet", ["--foo"])).toEqual(
+      expect.arrayContaining(["--model", "sonnet", "--foo"]),
+    );
+  });
+  it("omits --model when the model is empty (CLI default)", () => {
+    expect(subscriptionArgs("")).not.toContain("--model");
+  });
+});
 
 describe("subscriptionEnv (6.3)", () => {
   it("drops ANTHROPIC_API_KEY and keeps the rest", () => {
