@@ -6,9 +6,15 @@ import { AdapterError, LimitError, type LlmAdapter, type LlmRequest, type Stream
 // (spec 6.3 "no silent API billing"). Turns are serial (one hint at a time), so
 // a single process is reused warm and restarted if it crashes.
 //
-// shortcut: the stream-json wire shapes below (request + event JSON) are our
-// provisional contract. The exact `claude -p` payloads and the limit/reset-time
-// format are pending spike 1.4; swap `encodeRequest`/`decodeEvent` once captured.
+// Wire shapes captured in spike 1.4 (openspec .../spikes/1.4.md): input is one
+// stream-json `user` message line; output is `assistant` messages (text in
+// content items), a terminal `result` event, and proactive `rate_limit_event`s
+// carrying `resetsAt` (epoch SECONDS) per window.
+//
+// shortcut: the per-request system/prefix is folded into the user text. A static
+// session prefix could instead be passed once via `--append-system-prompt` for
+// prompt caching (seen warming to ~31k cached tokens in the spike); upgrade when
+// the hints layer separates the static CV/vacancy prefix from the live turn.
 
 /** Minimal child-process surface, injectable so tests use a fake CLI. */
 export interface ChildProc {
@@ -37,28 +43,52 @@ type Event =
 
 function encodeRequest(req: LlmRequest): string {
   const context = [req.prefix, req.system].filter(Boolean).join("\n\n");
-  return JSON.stringify({ type: "user", system: context, turns: req.turns, question: req.question });
+  const history = req.turns.map((t) => `${t.role}: ${t.text}`).join("\n");
+  const text = [context, history, req.question].filter(Boolean).join("\n\n");
+  return JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text }] } });
 }
 
 function decodeEvent(line: string): Event {
+  let ev: {
+    type?: string;
+    message?: { content?: Array<{ type?: string; text?: string }> };
+    rate_limit_info?: { status?: string; resetsAt?: number };
+    is_error?: boolean;
+    result?: unknown;
+    api_error_status?: unknown;
+  };
   try {
-    const ev = JSON.parse(line) as Partial<Event> & { text?: string; message?: string; resetAt?: number };
-    switch (ev.type) {
-      case "text":
-        return { type: "text", text: ev.text ?? "" };
-      case "limit":
-        return { type: "limit", resetAt: ev.resetAt };
-      case "error":
-        return { type: "error", message: ev.message ?? "subscription error" };
-      case "login_required":
-        return { type: "login_required" };
-      case "done":
-        return { type: "done" };
-      default:
-        return { type: "other" };
-    }
+    ev = JSON.parse(line);
   } catch {
     return { type: "other" };
+  }
+  switch (ev.type) {
+    case "assistant": {
+      const text = (ev.message?.content ?? [])
+        .filter((c) => c?.type === "text" && c.text)
+        .map((c) => c.text)
+        .join("");
+      return text ? { type: "text", text } : { type: "other" };
+    }
+    case "rate_limit_event": {
+      const info = ev.rate_limit_info;
+      if (info?.status && info.status !== "allowed") {
+        // resetsAt is epoch seconds; LimitError.resetAt is epoch ms.
+        const resetAt = typeof info.resetsAt === "number" ? info.resetsAt * 1000 : undefined;
+        return { type: "limit", resetAt };
+      }
+      return { type: "other" };
+    }
+    case "result": {
+      if (ev.is_error) {
+        const msg = String(ev.result ?? ev.api_error_status ?? "subscription error");
+        if (/login|logged in|authenticat|unauthor|credential/i.test(msg)) return { type: "login_required" };
+        return { type: "error", message: msg };
+      }
+      return { type: "done" };
+    }
+    default:
+      return { type: "other" };
   }
 }
 
@@ -209,17 +239,31 @@ export function subscriptionEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.P
   return env;
 }
 
+// Force an explicit model on the subscription path. `claude -p` defaults to
+// opus-5-5 with extended thinking (spike 1.4: TTFT p50 ~3160 ms) - far too slow
+// for live hints. With thinking off, sonnet and haiku have the SAME warm TTFT
+// (spike 1.4 re-run: p50 189 vs 194 ms, p90 604 vs 599 ms over 4 warm turns) -
+// first-token latency is network/CLI bound, not model-bound. So the choice is
+// quality vs subscription-quota burn, not speed: default to sonnet for better
+// hint quality at equal latency; override to "claude-haiku-5-5" to conserve quota,
+// or "" to let the CLI pick its default.
+export const SUBSCRIPTION_MODEL = "claude-sonnet-5-5";
+
+/** CLI args for a `-p` stream-json subscription turn, with the model forced. */
+export function subscriptionArgs(model: string = SUBSCRIPTION_MODEL, extraArgs: string[] = []): string[] {
+  // --verbose is required by the CLI for `-p` with stream-json output.
+  const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"];
+  if (model) args.push("--model", model);
+  return [...args, ...extraArgs];
+}
+
 /** Real spawn: a warm `claude -p` stream-json process, API key dropped from env. */
-export function realClaudeSpawn(command = "claude", extraArgs: string[] = []): SpawnFn {
+export function realClaudeSpawn(command = "claude", model = SUBSCRIPTION_MODEL, extraArgs: string[] = []): SpawnFn {
   return () => {
     // Lazy require keeps node:child_process out of the renderer/test import graph.
     const { spawn } = require("node:child_process") as typeof import("node:child_process");
     const { createInterface } = require("node:readline") as typeof import("node:readline");
-    const child = spawn(
-      command,
-      ["-p", "--input-format", "stream-json", "--output-format", "stream-json", ...extraArgs],
-      { env: subscriptionEnv(), stdio: ["pipe", "pipe", "inherit"] },
-    );
+    const child = spawn(command, subscriptionArgs(model, extraArgs), { env: subscriptionEnv(), stdio: ["pipe", "pipe", "inherit"] });
     const rl = createInterface({ input: child.stdout });
     return {
       writeLine: (line) => void child.stdin.write(line + "\n"),

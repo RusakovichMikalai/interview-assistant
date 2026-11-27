@@ -30,8 +30,31 @@ export function verifyOnDisk(spec: ModelSpec): ModelStatus {
 
 export function sha256File(path: string): string {
   const fs = require("node:fs") as typeof import("node:fs");
+  return sha256Bytes(fs.readFileSync(path));
+}
+
+export function sha256Bytes(bytes: Uint8Array): string {
   const { createHash } = require("node:crypto") as typeof import("node:crypto");
-  return createHash("sha256").update(fs.readFileSync(path)).digest("hex");
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+/** Fetches the model bytes for a spec (e.g. an HTTPS download of the catalog URL). */
+export type FetchFn = (spec: ModelSpec) => Promise<Uint8Array>;
+
+/**
+ * Downloads the model and writes it to disk only when its SHA-256 matches the
+ * catalog, so a corrupt or tampered download never lands as a usable file.
+ * shortcut: holds the whole model in memory before writing; upgrade to a
+ * streaming hash+write if model files outgrow available RAM.
+ */
+export async function downloadModel(spec: ModelSpec, fetchBytes: FetchFn): Promise<ModelStatus> {
+  const bytes = await fetchBytes(spec);
+  if (sha256Bytes(bytes) !== spec.sha256.toLowerCase()) return "corrupt";
+  const fs = require("node:fs") as typeof import("node:fs");
+  const { dirname } = require("node:path") as typeof import("node:path");
+  fs.mkdirSync(dirname(spec.path), { recursive: true });
+  fs.writeFileSync(spec.path, bytes);
+  return "ok";
 }
 
 export type StartCheck = { ok: true; spec: ModelSpec } | { ok: false; reason: ModelStatus };
@@ -46,6 +69,11 @@ export class ModelManager {
 
   status(language: Language): ModelStatus {
     return this.verify(this.catalog[language]);
+  }
+
+  /** Downloads the model for this language; returns "ok" only when the checksum matches. */
+  download(language: Language, fetchBytes: FetchFn): Promise<ModelStatus> {
+    return downloadModel(this.catalog[language], fetchBytes);
   }
 
   /** Whether a session may start for this language; blocks on a missing/corrupt model. */

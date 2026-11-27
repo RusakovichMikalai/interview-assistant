@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   claudeSubscriptionAdapter,
+  subscriptionArgs,
   subscriptionEnv,
+  SUBSCRIPTION_MODEL,
   type ChildProc,
 } from "../src/main/llm/adapters/claude-subscription";
 import { AdapterError, LimitError, type LlmRequest } from "../src/shared/llm";
 
 const REQ: LlmRequest = { system: "s", turns: [], question: "q?" };
+
+// Real `claude -p` stream-json event shapes (captured in spike 1.4).
+const assistantText = (text: string) => ({ type: "assistant", message: { content: [{ type: "text", text }] } });
+const resultDone = () => ({ type: "result", subtype: "success", is_error: false, result: "ok" });
 
 // A fake `claude` CLI child whose output lines the test feeds by hand.
 function fakeChild() {
@@ -72,6 +78,25 @@ async function collect(tokens: AsyncIterable<string>): Promise<string[]> {
 }
 const flush = () => new Promise<void>((r) => setImmediate(r));
 
+describe("subscriptionArgs (6.3)", () => {
+  it("forces the default non-thinking model by default", () => {
+    const args = subscriptionArgs();
+    expect(SUBSCRIPTION_MODEL).toBe("claude-sonnet-5-5");
+    expect(args).toContain("--verbose"); // required for -p stream-json output
+    const i = args.indexOf("--model");
+    expect(i).toBeGreaterThanOrEqual(0);
+    expect(args[i + 1]).toBe(SUBSCRIPTION_MODEL);
+  });
+  it("overrides the model and appends extra args", () => {
+    expect(subscriptionArgs("claude-haiku-5-5", ["--foo"])).toEqual(
+      expect.arrayContaining(["--model", "claude-haiku-5-5", "--foo"]),
+    );
+  });
+  it("omits --model when the model is empty (CLI default)", () => {
+    expect(subscriptionArgs("")).not.toContain("--model");
+  });
+});
+
 describe("subscriptionEnv (6.3)", () => {
   it("drops ANTHROPIC_API_KEY and keeps the rest", () => {
     const env = subscriptionEnv({ ANTHROPIC_API_KEY: "secret", PATH: "/usr/bin", HOME: "/home/x" });
@@ -87,12 +112,13 @@ describe("claude-subscription adapter (6.3)", () => {
     const a = claudeSubscriptionAdapter({ profileId: "sub", spawn: sp.spawn });
     const s = a.start(REQ);
     await flush();
-    sp.children[0].emit({ type: "text", text: "Hel" });
-    sp.children[0].emit({ type: "text", text: "lo" });
-    sp.children[0].emit({ type: "done" });
+    sp.children[0].emit(assistantText("Hel"));
+    sp.children[0].emit(assistantText("lo"));
+    sp.children[0].emit(resultDone());
     expect(await collect(s.tokens)).toEqual(["Hel", "lo"]);
     expect(sp.count).toBe(1); // warm: one process
-    expect(JSON.parse(sp.children[0].writes[0]).question).toBe("q?");
+    const sent = JSON.parse(sp.children[0].writes[0]);
+    expect(sent.message.content[0].text).toContain("q?");
   });
 
   it("reuses the same warm process for a second turn", async () => {
@@ -101,26 +127,38 @@ describe("claude-subscription adapter (6.3)", () => {
 
     const s1 = a.start(REQ);
     await flush();
-    sp.children[0].emit({ type: "text", text: "a" });
-    sp.children[0].emit({ type: "done" });
+    sp.children[0].emit(assistantText("a"));
+    sp.children[0].emit(resultDone());
     expect(await collect(s1.tokens)).toEqual(["a"]);
 
     const s2 = a.start(REQ);
     await flush();
-    sp.children[0].emit({ type: "text", text: "b" });
-    sp.children[0].emit({ type: "done" });
+    sp.children[0].emit(assistantText("b"));
+    sp.children[0].emit(resultDone());
     expect(await collect(s2.tokens)).toEqual(["b"]);
     expect(sp.count).toBe(1);
   });
 
-  it("maps a limit event to LimitError with resetAt", async () => {
+  it("ignores thinking-only and allowed rate-limit events, streams only text", async () => {
     const sp = spawner();
     const a = claudeSubscriptionAdapter({ profileId: "sub", spawn: sp.spawn });
     const s = a.start(REQ);
     await flush();
-    sp.children[0].emit({ type: "limit", resetAt: 42 });
+    sp.children[0].emit({ type: "assistant", message: { content: [{ type: "thinking", thinking: "..." }] } });
+    sp.children[0].emit({ type: "rate_limit_event", rate_limit_info: { status: "allowed", resetsAt: 1795796400 } });
+    sp.children[0].emit(assistantText("hi"));
+    sp.children[0].emit(resultDone());
+    expect(await collect(s.tokens)).toEqual(["hi"]);
+  });
+
+  it("maps a rate_limit_event (status != allowed) to LimitError with ms resetAt", async () => {
+    const sp = spawner();
+    const a = claudeSubscriptionAdapter({ profileId: "sub", spawn: sp.spawn });
+    const s = a.start(REQ);
+    await flush();
+    sp.children[0].emit({ type: "rate_limit_event", rate_limit_info: { status: "rejected", resetsAt: 42 } });
     await expect(collect(s.tokens)).rejects.toSatisfy(
-      (e: unknown) => e instanceof LimitError && e.resetAt === 42,
+      (e: unknown) => e instanceof LimitError && e.resetAt === 42000,
     );
   });
 
@@ -129,7 +167,7 @@ describe("claude-subscription adapter (6.3)", () => {
     const a = claudeSubscriptionAdapter({ profileId: "sub", spawn: sp.spawn });
     const s = a.start(REQ);
     await flush();
-    sp.children[0].emit({ type: "login_required" });
+    sp.children[0].emit({ type: "result", is_error: true, result: "Please run /login to authenticate" });
     await expect(collect(s.tokens)).rejects.toBeInstanceOf(AdapterError);
 
     // Second turn short-circuits; no new process is spawned.
@@ -150,8 +188,8 @@ describe("claude-subscription adapter (6.3)", () => {
 
     const s2 = a.start(REQ);
     await flush();
-    sp.children[1].emit({ type: "text", text: "back" });
-    sp.children[1].emit({ type: "done" });
+    sp.children[1].emit(assistantText("back"));
+    sp.children[1].emit(resultDone());
     expect(await collect(s2.tokens)).toEqual(["back"]);
   });
 });
