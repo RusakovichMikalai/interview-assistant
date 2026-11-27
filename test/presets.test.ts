@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   PRESETS,
   addProfile,
+  adapterFromProfile,
   findPreset,
   profileFromPreset,
   removeProfile,
@@ -100,5 +101,27 @@ describe("test profile TTFT (6.1)", () => {
 
   it("reports an empty response", async () => {
     expect(await testProfile(okAdapter([]), req)).toEqual({ ok: false, error: "empty response" });
+  });
+});
+
+describe("adapterFromProfile (6.1 extension point)", () => {
+  const base = { id: "p", name: "n", role: "fast" as const };
+  it("builds an adapter for each kind, carrying the profile id", () => {
+    const anth = adapterFromProfile({ ...base, adapter: "anthropic", model: "claude-haiku-5-5" }, { apiKey: "k" });
+    expect(anth.kind).toBe("anthropic");
+    expect(anth.profileId).toBe("p");
+    const oai = adapterFromProfile({ ...base, adapter: "openai-compatible", baseUrl: "http://x/v1", model: "m" }, { apiKey: "k" });
+    expect(oai.kind).toBe("openai-compatible");
+    const sub = adapterFromProfile({ ...base, adapter: "claude-subscription" }, { spawn: () => { throw new Error("no spawn in test"); } });
+    expect(sub.kind).toBe("claude-subscription");
+  });
+  it("rejects a subscription profile without a spawn fn", () => {
+    expect(() => adapterFromProfile({ ...base, adapter: "claude-subscription" })).toThrow(/spawn/);
+  });
+  it("every preset's adapter kind is dispatchable", () => {
+    for (const p of PRESETS) {
+      const profile = profileFromPreset({ presetId: p.id, role: "fast", model: p.model || "m" });
+      expect(() => adapterFromProfile(profile, { apiKey: "k", spawn: () => { throw new Error("x"); } })).not.toThrow();
+    }
   });
 });

@@ -1,5 +1,7 @@
 import type { LlmProfile, ProfileRole } from "../../shared/settings";
 import type { LlmAdapter, LlmRequest } from "../../shared/llm";
+import { anthropicAdapter, openaiCompatibleAdapter } from "./adapters/http";
+import { claudeSubscriptionAdapter, type SpawnFn } from "./adapters/claude-subscription";
 
 // Provider presets and profile CRUD (llm-routing spec, task 6.1). Presets seed a
 // profile with an adapter kind, base URL and a default (editable) model id; the
@@ -78,6 +80,39 @@ export function updateProfile(
 
 export function removeProfile(profiles: LlmProfile[], id: string): LlmProfile[] {
   return profiles.filter((p) => p.id !== id);
+}
+
+// --- Profile -> adapter (the single provider extension point) ---
+// This switch is the one place adapter kinds are dispatched. Adding a provider on
+// an existing protocol needs no code here - just a new `PRESETS` row (e.g. any
+// OpenAI-compatible API, like the `custom` preset). Adding a NEW protocol is one
+// new `AdapterKind`, one adapter module, and one `case`; the exhaustive switch
+// makes the compiler flag the missing case, so a new kind cannot be half-wired.
+export interface AdapterDeps {
+  /** API key resolved from the profile's `keyRef`; the main process reads it from
+   *  SecretStore and passes it here, so secrets never live in a profile or preset. */
+  apiKey?: string;
+  /** Spawns the `claude` CLI; required only for the `claude-subscription` kind. */
+  spawn?: SpawnFn;
+  /** Injectable fetch for the HTTP adapters (tests). */
+  fetchImpl?: typeof fetch;
+}
+/** Build a running adapter from a saved profile. Throws for an unknown kind. */
+export function adapterFromProfile(p: LlmProfile, deps: AdapterDeps = {}): LlmAdapter {
+  switch (p.adapter) {
+    case "anthropic":
+      return anthropicAdapter({ profileId: p.id, model: p.model ?? "", apiKey: deps.apiKey ?? "", baseUrl: p.baseUrl, fetchImpl: deps.fetchImpl });
+    case "openai-compatible":
+      return openaiCompatibleAdapter({ profileId: p.id, model: p.model ?? "", apiKey: deps.apiKey ?? "", baseUrl: p.baseUrl, fetchImpl: deps.fetchImpl });
+    case "claude-subscription": {
+      if (!deps.spawn) throw new Error("claude-subscription profile needs a spawn fn");
+      return claudeSubscriptionAdapter({ profileId: p.id, spawn: deps.spawn });
+    }
+    default: {
+      const exhaustive: never = p.adapter;
+      throw new Error(`unknown adapter kind ${String(exhaustive)}`);
+    }
+  }
 }
 
 // --- "Test" button: time to first token, or the error text ---
