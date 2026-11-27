@@ -10,7 +10,7 @@
 
 ## 2. Project skeleton
 
-- [ ] 2.1 Create Electron + TypeScript project with main, renderer, utility process and electron-builder targets for win, mac, linux; verify: installers build in CI for all three OS
+- [x] 2.1 Create Electron + TypeScript project with main, renderer, utility process and electron-builder targets for win, mac, linux; verify: installers build in CI for all three OS
 - [x] 2.2 Add settings store (mode, language, profiles, hotkeys) without secrets; verify: unit test that saved settings JSON contains no key values
 - [x] 2.3 Add secret storage via `safeStorage`; verify: unit test round-trip and absence of the key in logs
 
@@ -62,7 +62,7 @@
 
 ## 9. Pairing (HOST / VIEWER)
 
-- [ ] 9.1 Pairing by QR and 6-digit code, 5-min expiry, one-time use, key pinning; verify: unit tests for expiry and reuse
+- [x] 9.1 Pairing by QR and 6-digit code, 5-min expiry, one-time use, key pinning; verify: unit tests for expiry and reuse
 - [ ] 9.2 mDNS discovery and manual IP; verify: manual test on LAN
 - [ ] 9.3 WebRTC with two Opus tracks, DTLS-SRTP, reject unpaired peers; verify: test that unpaired peer gets no media
 - [ ] 9.4 Link state, delay indicator, auto-reconnect, gap marker; verify: test with 10 s network drop
