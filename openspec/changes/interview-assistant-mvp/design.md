@@ -34,6 +34,7 @@ Electron gives `setContentProtection`, `globalShortcut`, tray, `safeStorage`, ut
 | Linux | PipeWire/PulseAudio monitor source | mic |
 
 Native capture lives in a small N-API addon per OS; frames go to the STT process as 16 kHz mono PCM. Echo: WebRTC AEC on the mic channel using the loopback as reference.
+- Linux revision (spike 1.6, task 4.3): Chromium/getUserMedia does not expose PipeWire monitor sources, and a native N-API addon is not worth its build glue for the MVP. Linux instead spawns the PipeWire/Pulse stack's own recorder (`parecord`) per channel, emitting the same 16 kHz mono PCM. Trade-off: whole-source capture only (no per-process interviewer source) and a runtime dependency on the recorder binary, which ships with PipeWire. Upgrade to a libpipewire addon if per-process capture becomes a hard requirement. Windows/macOS still use the native addon.
 - Alternative: virtual audio driver (BlackHole, VB-Cable). Extra install and user routing. Kept only as a VIEWER-SOLO fallback.
 - Alternative: diarization on a mixed stream. Slower and less accurate. Used only in VIEWER-SOLO.
 
