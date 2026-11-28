@@ -5,7 +5,7 @@
 - [ ] 1.3 Measure TTFT of each preset (Claude fast/deep, DeepSeek, Groq, Cerebras, Ollama) with a 2k-token cached prefix; verify: table with p50/p90 over 20 requests
 - [ ] 1.4 Run a warm `claude -p` stream-json process with tools disabled and no `ANTHROPIC_API_KEY`; capture TTFT and the exact limit error and reset-time format; verify: report with sample error payload
 - [ ] 1.5 Check capture exclusion on Windows 11, macOS 14 and 15 with Zoom, Teams, Meet (Chrome) full-screen share; verify: screenshots from the receiving side
-- [ ] 1.6 Check that Electron/Chromium lists PipeWire monitor sources on Ubuntu 24.04 and Fedora; verify: note with result, decide on native addon
+- [x] 1.6 Check that Electron/Chromium lists PipeWire monitor sources on Ubuntu 24.04 and Fedora; verify: note with result, decide on native addon
 - [ ] 1.7 Check mDNS discovery between two laptops on home Wi-Fi and a guest corporate network; verify: note with result
 
 ## 2. Project skeleton
