@@ -9,7 +9,7 @@ export interface HttpAdapterConfig {
   profileId: string;
   model: string;
   apiKey: string;
-  /** Full chat-completions URL (openai-compatible) or the Anthropic base; see defaults. */
+  /** API base (e.g. https://api.deepseek.com/v1); the adapter appends the route. See defaults. */
   baseUrl?: string;
   maxTokens?: number;
   /** Injectable for tests; defaults to the global fetch. */
@@ -106,7 +106,9 @@ export function anthropicAdapter(cfg: HttpAdapterConfig): LlmAdapter {
 
 export function openaiCompatibleAdapter(cfg: HttpAdapterConfig): LlmAdapter {
   const fetchImpl = cfg.fetchImpl ?? fetch;
-  const url = cfg.baseUrl ?? "https://api.openai.com/v1/chat/completions";
+  // Presets store the API base (.../v1); append the chat route. Accept a full URL too.
+  const base = (cfg.baseUrl || "https://api.openai.com/v1").replace(/\/+$/, "");
+  const url = base.endsWith("/chat/completions") ? base : `${base}/chat/completions`;
   return {
     profileId: cfg.profileId,
     kind: "openai-compatible",

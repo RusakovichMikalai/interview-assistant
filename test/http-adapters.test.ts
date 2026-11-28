@@ -72,6 +72,18 @@ describe("openai-compatible adapter (6.2)", () => {
     expect(await collect(a.start(REQ).tokens)).toEqual(["foo", "bar"]);
   });
 
+  it("appends /chat/completions to the base URL (regression: preset baseUrl is .../v1)", async () => {
+    const seen: string[] = [];
+    const base = await serve((req) => {
+      seen.push((req as { url?: string }).url ?? "");
+      return { sse: [`data: [DONE]\n\n`] };
+    });
+    for (const b of [base, `${base}/`, `${base}/chat/completions`]) {
+      await collect(openaiCompatibleAdapter({ profileId: "o", model: "m", apiKey: "k", baseUrl: b }).start(REQ).tokens);
+    }
+    expect(seen).toEqual(["/chat/completions", "/chat/completions", "/chat/completions"]);
+  });
+
   it("throws AdapterError on a 500", async () => {
     const base = await serve(() => ({ status: 500 }));
     const a = openaiCompatibleAdapter({ profileId: "o", model: "m", apiKey: "k", baseUrl: base });
