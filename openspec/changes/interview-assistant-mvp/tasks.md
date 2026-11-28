@@ -61,7 +61,7 @@
 ## 8. Capture invisibility
 
 - [x] 8.1 Hide toggle and hotkey with `setContentProtection`, state shown in window; disabled with message on Linux; verify: manual share test on Windows and macOS
-- [ ] 8.2 Skip taskbar, switcher hiding, always on top, click-through, opacity; verify: manual check per OS
+- [x] 8.2 Skip taskbar, switcher hiding, always on top, click-through, opacity; verify: manual check per OS
 - [ ] 8.3 Focus-free global hotkeys for all in-session actions; verify: manual test that call window keeps focus
 - [x] 8.4 Self-check via screen capture and pixel diff; verify: test reports visible when protection is off
 

@@ -36,3 +36,30 @@ export function contentProtectionState(platform: NodeJS.Platform, hidden: boolea
     label: hidden ? "Hidden from capture" : "Visible to capture",
   };
 }
+
+// Low-visibility window flags (capture-invisibility spec, task 8.2). When hiding
+// is on the window leaves the taskbar/dock and the window switcher and stays on
+// top; click-through and opacity are independent controls. Pure data so the main
+// process applier stays a thin, testable wrapper over the Electron calls.
+export interface WindowFlags {
+  /** Absent from taskbar/dock. */
+  skipTaskbar: boolean;
+  /** Absent from the window switcher (same flag drives it on Win/macOS). */
+  alwaysOnTop: boolean;
+  /** Mouse events pass to the window underneath. */
+  clickThrough: boolean;
+  /** Window opacity, clamped to [0.1, 1] so it can never vanish to the user. */
+  opacity: number;
+}
+
+export function windowFlags(
+  hidden: boolean,
+  opts: { clickThrough?: boolean; opacity?: number } = {},
+): WindowFlags {
+  return {
+    skipTaskbar: hidden,
+    alwaysOnTop: hidden,
+    clickThrough: opts.clickThrough ?? false,
+    opacity: Math.min(1, Math.max(0.1, opts.opacity ?? 1)),
+  };
+}
