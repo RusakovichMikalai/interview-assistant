@@ -37,6 +37,13 @@ it("shows that hiding from capture is unsupported on Linux", async () => {
   expect(await page.locator("#protection").getAttribute("data-disabled")).toBe("true");
 });
 
+// Task 6.1: the provider-profile CRUD UI must paint in the real window - the
+// preset dropdown (seven choices) and the "Add" control that renderer.js builds.
+it("paints the provider-profile add row with the preset choices", async () => {
+  await expect.poll(() => page.locator("#profiles-add select.preset option").count()).toBe(7);
+  expect(await page.locator("#profiles-add button.add").textContent()).toBe("Add");
+});
+
 it("screenshots the launched window", async () => {
   const shot = resolve(__dirname, "screenshots", "launch.png");
   mkdirSync(dirname(shot), { recursive: true });

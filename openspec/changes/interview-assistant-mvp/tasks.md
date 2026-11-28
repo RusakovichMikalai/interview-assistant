@@ -36,7 +36,7 @@
 
 ## 6. LLM routing
 
-- [ ] 6.1 Profile model, presets, CRUD UI and "Test" button with TTFT; verify: unit tests for presets, manual test against one API
+- [x] 6.1 Profile model, presets, CRUD UI and "Test" button with TTFT; verify: unit tests for presets, manual test against one API
 - [x] 6.2 Adapters `anthropic` and `openai-compatible` with streaming and abort; verify: tests with a mock server
 - [x] 6.3 `claude-subscription` adapter: warm CLI process, env without `ANTHROPIC_API_KEY`, login detection, restart on crash; verify: tests with a fake CLI binary
 - [x] 6.4 Router: health states, failover on limit and error, LIMITED until reset; verify: unit tests for each transition with fake clocks
