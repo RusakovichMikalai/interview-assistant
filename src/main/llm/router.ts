@@ -25,6 +25,9 @@ export interface RouterOptions {
   maxThresholdMs?: number; // hedge threshold cap
   ttftWindow?: number; // number of recent primary TTFTs kept
   lostRacesForSlow?: number; // consecutive lost hedges that trigger SLOW
+  stickyFallback?: boolean; // sequential sticky fallback instead of hedging (spec 6.11)
+  slowThresholdMs?: number; // sticky: TTFT above this benches the primary after the turn
+  abortThresholdMs?: number; // sticky: no first token by this -> same-turn failover
 }
 
 export interface RunResult {
@@ -52,6 +55,9 @@ const RANK: Record<Health, number> = { OK: 0, SLOW: 1, LIMITED: 2, DOWN: 3 };
 export class Router {
   private readonly o: Required<RouterOptions>;
   private readonly state = new Map<string, HState>();
+  /** Profiles benched by a sticky-fallback trigger; sink to the back of every
+   *  chain until the process restarts (spec 6.10). */
+  private readonly benched = new Set<string>();
   private chain: ChainName = "fast";
 
   constructor(options: RouterOptions) {
@@ -63,6 +69,9 @@ export class Router {
       maxThresholdMs: 1500,
       ttftWindow: 20,
       lostRacesForSlow: 3,
+      stickyFallback: false,
+      slowThresholdMs: 5_000,
+      abortThresholdMs: 10_000,
       ...options,
     };
     if (this.o.fast.length < 1 || this.o.deep.length < 1) {
@@ -77,6 +86,11 @@ export class Router {
 
   getChain(): ChainName {
     return this.chain;
+  }
+
+  /** Profile ids of a chain in configured order (diagnostics and tests). */
+  chainProfileIds(name: ChainName = this.chain): string[] {
+    return (name === "fast" ? this.o.fast : this.o.deep).map((a) => a.profileId);
   }
 
   health(profileId: string): Health {
@@ -101,7 +115,9 @@ export class Router {
     const profiles = this.chain === "fast" ? this.o.fast : this.o.deep;
     const primaryHealth = this.health(profiles[0].profileId);
     const order = this.activeOrder(profiles);
-    const winner = await this.execute(order, req);
+    const winner = this.o.stickyFallback
+      ? await this.executeSticky(order, req)
+      : await this.execute(order, req);
     return { source: winner.source, primaryHealth, stream: winner.stream };
   }
 
@@ -116,10 +132,12 @@ export class Router {
     return s;
   }
 
-  /** Stable health sort: OK before SLOW before LIMITED/DOWN, chain order among equals. */
+  /** Stable health sort: OK before SLOW before LIMITED/DOWN, chain order among
+   *  equals. A benched profile sinks below every non-benched one. */
   private activeOrder(profiles: LlmAdapter[]): LlmAdapter[] {
+    const rank = (id: string): number => (this.benched.has(id) ? 99 : RANK[this.health(id)]);
     return profiles
-      .map((a, i) => ({ a, i, rank: RANK[this.health(a.profileId)] }))
+      .map((a, i) => ({ a, i, rank: rank(a.profileId) }))
       .sort((x, y) => x.rank - y.rank || x.i - y.i)
       .map((e) => e.a);
   }
@@ -210,6 +228,63 @@ export class Router {
     this.markError(primary.profileId, decided.errs[primary.profileId]);
     this.markError(backup.profileId, decided.errs[backup.profileId]);
     return this.execute(order.slice(2), req);
+  }
+
+  // Sticky fallback (spec 6.11): sequential, no hedging. The head keeps the
+  // current turn when it answers in time; a trigger (error, no token by the
+  // abort threshold, a warning, or TTFT over the slow threshold) benches it for
+  // the rest of the session, so the next turn starts on the fallback.
+  private async executeSticky(
+    order: LlmAdapter[],
+    req: LlmRequest,
+  ): Promise<{ source: string; stream: AsyncIterable<string> }> {
+    if (order.length === 0) throw new AdapterError("no available profile");
+    const head = order[0];
+    const t0 = this.o.timers.now();
+    const session = head.start(req);
+    const first = pullFirst(session);
+    const timer = this.o.timers.sleep(this.o.abortThresholdMs);
+
+    const raced = await Promise.race([
+      first.then((f) => ({ t: "first" as const, f })),
+      timer.promise.then(() => ({ t: "timeout" as const })),
+    ]);
+
+    if (raced.t === "first") {
+      timer.cancel();
+      if (raced.f.kind === "token") {
+        const ttft = this.o.timers.now() - t0;
+        this.recordTtft(head.profileId, ttft);
+        return {
+          source: head.profileId,
+          stream: this.streamThenBench(head.profileId, raced.f.chunk, session, ttft),
+        };
+      }
+      // Error before the abort threshold: same-turn failover, bench the head.
+      this.markError(head.profileId, raced.f.err);
+      this.benched.add(head.profileId);
+      return this.executeSticky(order.slice(1), req);
+    }
+
+    // No token by the abort threshold: drop it, bench it, fail over same-turn.
+    session.abort();
+    this.markError(head.profileId, new AdapterError("no first token within abort threshold"));
+    this.benched.add(head.profileId);
+    return this.executeSticky(order.slice(1), req);
+  }
+
+  /** Stream the head's answer, then bench it if a warning was seen or the first
+   *  token was slower than the slow threshold. Benching after the stream also
+   *  catches a warning that arrives mid-answer. */
+  private async *streamThenBench(
+    id: string,
+    first: string,
+    session: StreamSession,
+    ttft: number,
+  ): AsyncIterable<string> {
+    yield first;
+    for await (const c of session.tokens) yield c;
+    if (ttft > this.o.slowThresholdMs || session.warned) this.benched.add(id);
   }
 
   private onPrimaryLostRace(primaryId: string): void {

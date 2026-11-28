@@ -1,7 +1,9 @@
-import type { LlmProfile, ProfileRole } from "../../shared/settings";
+import type { LlmProfile, ProfileRole, Settings } from "../../shared/settings";
 import type { LlmAdapter, LlmRequest } from "../../shared/llm";
 import { anthropicAdapter, openaiCompatibleAdapter } from "./adapters/http";
 import { claudeSubscriptionAdapter, type SpawnFn } from "./adapters/claude-subscription";
+import { Router } from "./router";
+import type { Timers } from "./timers";
 
 // Provider presets and profile CRUD (llm-routing spec, task 6.1). Presets seed a
 // profile with an adapter kind, base URL and a default (editable) model id; the
@@ -113,6 +115,33 @@ export function adapterFromProfile(p: LlmProfile, deps: AdapterDeps = {}): LlmAd
       throw new Error(`unknown adapter kind ${String(exhaustive)}`);
     }
   }
+}
+
+// --- Session wiring: build the router from saved settings (spec 6.13) ---
+// Each role's profiles become that chain's primaries in list order; the
+// designated fallback profile is appended as the shared backup and turns on
+// sticky fallback. shortcut: one cross-chain fallback and role order as chain
+// order; upgrade to a per-chain fallback picker when the settings UI grows one.
+export function buildRouter(settings: Settings, timers: Timers, deps: AdapterDeps = {}): Router {
+  const adapters = new Map<string, LlmAdapter>();
+  const adapterFor = (p: LlmProfile): LlmAdapter => {
+    let a = adapters.get(p.id);
+    if (!a) {
+      a = adapterFromProfile(p, deps);
+      adapters.set(p.id, a);
+    }
+    return a;
+  };
+  const fallbackProfile = settings.profiles.find((p) => p.id === settings.fallbackProfileId);
+  const fallback = fallbackProfile ? adapterFor(fallbackProfile) : undefined;
+  const chainFor = (role: ProfileRole): LlmAdapter[] => {
+    const list = settings.profiles
+      .filter((p) => p.role === role && p.id !== settings.fallbackProfileId)
+      .map(adapterFor);
+    if (fallback) list.push(fallback);
+    return list;
+  };
+  return new Router({ fast: chainFor("fast"), deep: chainFor("deep"), timers, stickyFallback: !!fallback });
 }
 
 // --- "Test" button: time to first token, or the error text ---

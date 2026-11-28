@@ -3,13 +3,15 @@ import {
   PRESETS,
   addProfile,
   adapterFromProfile,
+  buildRouter,
   findPreset,
   profileFromPreset,
   removeProfile,
   testProfile,
   updateProfile,
 } from "../src/main/llm/presets";
-import type { LlmProfile } from "../src/shared/settings";
+import { DEFAULT_SETTINGS, type LlmProfile, type Settings } from "../src/shared/settings";
+import { ManualTimers } from "../src/main/llm/timers";
 import type { LlmAdapter, StreamSession } from "../src/shared/llm";
 
 const req = { system: "s", turns: [], question: "q" };
@@ -123,5 +125,37 @@ describe("adapterFromProfile (6.1 extension point)", () => {
       const profile = profileFromPreset({ presetId: p.id, role: "fast", model: p.model || "m" });
       expect(() => adapterFromProfile(profile, { apiKey: "k", spawn: () => { throw new Error("x"); } })).not.toThrow();
     }
+  });
+});
+
+describe("buildRouter (6.13)", () => {
+  const noSpawn = () => { throw new Error("no spawn in test"); };
+
+  it("puts each role's profiles first and appends the fallback as the shared backup", () => {
+    const settings: Settings = {
+      ...DEFAULT_SETTINGS,
+      profiles: [
+        { id: "sub", name: "Claude sub", adapter: "claude-subscription", role: "fast" },
+        { id: "deep1", name: "Claude deep", adapter: "claude-subscription", role: "deep" },
+        { id: "fb", name: "DeepSeek", adapter: "openai-compatible", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat", role: "fast" },
+      ],
+      fallbackProfileId: "fb",
+    };
+    const r = buildRouter(settings, new ManualTimers(), { spawn: noSpawn });
+    expect(r.chainProfileIds("fast")).toEqual(["sub", "fb"]); // fallback last, not duplicated as a primary
+    expect(r.chainProfileIds("deep")).toEqual(["deep1", "fb"]); // shared across both chains
+  });
+
+  it("builds plain chains with no fallback when none is designated", () => {
+    const settings: Settings = {
+      ...DEFAULT_SETTINGS,
+      profiles: [
+        { id: "f", name: "DeepSeek", adapter: "openai-compatible", role: "fast" },
+        { id: "d", name: "DeepSeek", adapter: "openai-compatible", role: "deep" },
+      ],
+    };
+    const r = buildRouter(settings, new ManualTimers());
+    expect(r.chainProfileIds("fast")).toEqual(["f"]);
+    expect(r.chainProfileIds("deep")).toEqual(["d"]);
   });
 });

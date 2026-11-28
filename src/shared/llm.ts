@@ -42,6 +42,10 @@ export interface StreamSession {
   tokens: AsyncIterableIterator<string>;
   /** Stop the request and free its resources. Idempotent. */
   abort(): void;
+  /** Non-fatal throttle signal seen during the turn (e.g. the subscription's
+   *  near-limit `allowed_warning`). The turn still succeeds; the router reads
+   *  this after the stream ends to bench the primary. */
+  readonly warned?: boolean;
 }
 
 export interface LlmAdapter {

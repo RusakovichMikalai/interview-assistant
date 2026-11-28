@@ -44,6 +44,11 @@
 - [x] 6.6 Mandatory backup when subscription is primary; verify: test that session start is refused
 - [x] 6.7 Source and health indicator in overlay; verify: UI test shows `SUB`, `API`, `API (limit)`
 - [x] 6.8 Fast/deep chains with hotkey switch; verify: test that next request uses the selected chain
+- [x] 6.9 Fallback profile setting in UI (one shared cross-chain fallback per the sticky design, not per-chain; mandatory backup when subscription is primary); verify: UI test that the chosen fallback is saved as the backup
+- [x] 6.10 Sticky bench: `benched` set in Router, benched profile sinks to the back of `activeOrder` until restart, never auto-cleared; verify: unit test that a benched profile stays last
+- [x] 6.11 Sticky-fallback turn logic (precedes hedging on the chain): slow threshold 5 s, abort threshold 10 s; first token < 10 s streams head fully, then bench if a warning was seen or TTFT > 5 s; no token by 10 s or an error -> same-turn failover + bench; verify: unit tests with fake adapters and clock for each branch
+- [x] 6.12 Surface `allowed_warning` from `claude-subscription` adapter to the Router as a non-fatal throttle signal (currently dropped as `{type:"other"}`); verify: test that a warning event benches the primary without aborting the turn
+- [x] 6.13 Build the Router from configured profiles at session start (currently `new Router` is never called); verify: test that a session constructs the Router with `[primary, fallback]`
 
 ## 7. Answer hints
 

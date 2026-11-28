@@ -55,7 +55,7 @@ When the primary fails with a connection error, a crash or an error response, th
 - **THEN** the backup receives the request within 100 ms
 
 ### Requirement: Hedged request on slow answer
-When the primary has not returned a first token within the slow threshold, the application SHALL start the same request on the backup in parallel. The first profile to return a token SHALL win, its stream SHALL be shown, and the other request SHALL be cancelled. The threshold SHALL adapt to the recent first-token times of the primary, starting at 800 ms and never exceeding 1500 ms.
+When the primary has not returned a first token within the slow threshold, the application SHALL start the same request on the backup in parallel. The first profile to return a token SHALL win, its stream SHALL be shown, and the other request SHALL be cancelled. The threshold SHALL adapt to the recent first-token times of the primary, starting at 800 ms and never exceeding 1500 ms. This behavior applies only when the sticky fallback behavior (see "Sticky fallback on trigger") is not active for the chain; sticky fallback takes precedence and runs sequentially instead of hedging.
 
 #### Scenario: Backup wins
 - **WHEN** the primary is silent past the threshold and the backup returns a token first
@@ -89,3 +89,29 @@ The user SHALL be able to assign a fast and a deep profile chain and switch betw
 #### Scenario: Switch to deep
 - **WHEN** the user presses the deep hotkey before a system design question
 - **THEN** the next hint uses the deep chain
+
+### Requirement: Fallback model setting
+The user SHALL be able to designate a fallback profile in settings, used when the primary has problems. When the subscription option is the primary, this fallback SHALL be the mandatory backup required by "Backup chain".
+
+#### Scenario: Pick a fallback
+- **WHEN** the user selects a fallback profile in settings
+- **THEN** that profile is used as the backup for the primary chain
+
+### Requirement: Sticky fallback on trigger
+When the sticky fallback behavior is active for a chain, the application SHALL switch the whole session to the fallback once a trigger fires, instead of hedging. A trigger SHALL be any of: an error, a usage limit, a near-limit warning reported by the subscription, or a first token slower than the slow threshold of 5 seconds. A triggered primary SHALL be benched: it sinks to the back of the chain for the rest of the session and SHALL be cleared only by an application restart.
+
+The turn behavior SHALL be:
+- When the primary returns a first token before the abort threshold of 10 seconds, its answer SHALL be shown for the current turn; if a near-limit warning was seen or the first token was slower than 5 seconds, the primary SHALL be benched and the next turn SHALL start on the fallback.
+- When the primary returns no token within the abort threshold of 10 seconds, or returns an error, the same request SHALL be sent to the fallback immediately and the primary SHALL be benched.
+
+#### Scenario: Warning benches for the next turn
+- **WHEN** the subscription returns its first token at 4 seconds together with a near-limit warning
+- **THEN** that answer is shown for the current turn and the next request starts on the fallback
+
+#### Scenario: No answer fails over on the same turn
+- **WHEN** the primary returns no token within 10 seconds
+- **THEN** the same request is answered by the fallback and the primary is benched
+
+#### Scenario: Benched until restart
+- **WHEN** a primary has been benched during a session
+- **THEN** it is not used again until the application restarts

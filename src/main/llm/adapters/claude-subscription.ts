@@ -36,6 +36,7 @@ export interface SubscriptionConfig {
 type Event =
   | { type: "text"; text: string }
   | { type: "limit"; resetAt?: number }
+  | { type: "warning" }
   | { type: "error"; message: string }
   | { type: "login_required" }
   | { type: "done" }
@@ -72,11 +73,17 @@ function decodeEvent(line: string): Event {
     }
     case "rate_limit_event": {
       const info = ev.rate_limit_info;
-      if (info?.status && info.status !== "allowed") {
+      // `allowed` and `allowed_warning` both mean the request was served (a
+      // warning just reports the window is filling up). Only a non-allowed
+      // status (rejected/blocked/etc.) is a hard limit that kills the turn.
+      if (info?.status && !info.status.startsWith("allowed")) {
         // resetsAt is epoch seconds; LimitError.resetAt is epoch ms.
         const resetAt = typeof info.resetsAt === "number" ? info.resetsAt * 1000 : undefined;
         return { type: "limit", resetAt };
       }
+      // `allowed_warning` means the window is filling up: served now, but a
+      // non-fatal signal for the router to bench the primary (spec 6.12).
+      if (info?.status === "allowed_warning") return { type: "warning" };
       return { type: "other" };
     }
     case "result": {
@@ -94,6 +101,8 @@ function decodeEvent(line: string): Event {
 
 /** Single-producer / single-consumer queue feeding one turn's token stream. */
 class TurnSink {
+  /** Set when a non-fatal throttle warning arrived during this turn. */
+  warned = false;
   private q: Array<{ v: string } | { err: Error } | { done: true }> = [];
   private waiter: (() => void) | null = null;
 
@@ -158,6 +167,9 @@ class ClaudeSubscription implements LlmAdapter {
       abort: () => {
         if (this.active === sink) this.active = null;
       },
+      get warned() {
+        return sink.warned;
+      },
     };
   }
 
@@ -187,6 +199,11 @@ class ClaudeSubscription implements LlmAdapter {
         switch (ev.type) {
           case "text":
             this.active.push(ev.text);
+            break;
+          case "warning":
+            // Served, but the primary is near its limit: flag the turn so the
+            // router benches it afterwards. Does not end the stream.
+            this.active.warned = true;
             break;
           case "limit": {
             const s = this.active;

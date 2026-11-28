@@ -151,6 +151,19 @@ describe("claude-subscription adapter (6.3)", () => {
     expect(await collect(s.tokens)).toEqual(["hi"]);
   });
 
+  it("treats an allowed_warning rate-limit event as served, not a hard limit", async () => {
+    // Regression: the real CLI emits status "allowed_warning" when a window
+    // fills up but the turn still completes. It must not fail the turn.
+    const sp = spawner();
+    const a = claudeSubscriptionAdapter({ profileId: "sub", spawn: sp.spawn });
+    const s = a.start(REQ);
+    await flush();
+    sp.children[0].emit({ type: "rate_limit_event", rate_limit_info: { status: "allowed_warning", resetsAt: 1796032800 } });
+    sp.children[0].emit(assistantText("hi"));
+    sp.children[0].emit(resultDone());
+    expect(await collect(s.tokens)).toEqual(["hi"]);
+  });
+
   it("maps a rate_limit_event (status != allowed) to LimitError with ms resetAt", async () => {
     const sp = spawner();
     const a = claudeSubscriptionAdapter({ profileId: "sub", spawn: sp.spawn });
@@ -160,6 +173,19 @@ describe("claude-subscription adapter (6.3)", () => {
     await expect(collect(s.tokens)).rejects.toSatisfy(
       (e: unknown) => e instanceof LimitError && e.resetAt === 42000,
     );
+  });
+
+  it("surfaces allowed_warning as a non-fatal warned flag without ending the turn (6.12)", async () => {
+    const sp = spawner();
+    const a = claudeSubscriptionAdapter({ profileId: "sub", spawn: sp.spawn });
+    const s = a.start(REQ);
+    await flush();
+    expect(s.warned).toBe(false);
+    sp.children[0].emit({ type: "rate_limit_event", rate_limit_info: { status: "allowed_warning", resetsAt: 99 } });
+    sp.children[0].emit(assistantText("still here"));
+    sp.children[0].emit(resultDone());
+    expect(await collect(s.tokens)).toEqual(["still here"]); // turn served, not aborted
+    expect(s.warned).toBe(true);
   });
 
   it("detects a logged-out CLI and refuses the next turn without respawning", async () => {

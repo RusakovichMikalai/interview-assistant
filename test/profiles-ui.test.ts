@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   PRESET_CHOICES,
   renderAddRow,
+  renderFallbackSelect,
   renderProfileList,
   renderTestResult,
   type ProfileView,
@@ -64,6 +65,21 @@ describe("profile CRUD UI (6.1)", () => {
     expect(onTest).toHaveBeenCalledWith("a");
     (el.querySelector('.profile[data-id="a"] .delete') as HTMLButtonElement).click();
     expect(onDelete).toHaveBeenCalledWith("a");
+  });
+
+  it("saves the chosen fallback as the backup and clears it on (none) (6.9)", () => {
+    const el = document.createElement("div");
+    const onChange = vi.fn();
+    renderFallbackSelect(el, profiles, "b", onChange);
+    const select = el.querySelector("select.fallback") as HTMLSelectElement;
+    expect([...select.querySelectorAll("option")].map((o) => (o as HTMLOptionElement).value)).toEqual(["", "a", "b"]);
+    expect(select.value).toBe("b"); // current preselected
+    select.value = "a";
+    select.dispatchEvent(new Event("change"));
+    expect(onChange).toHaveBeenCalledWith("a");
+    select.value = "";
+    select.dispatchEvent(new Event("change"));
+    expect(onChange).toHaveBeenCalledWith(undefined); // (none) clears it
   });
 
   it("shows the TTFT in ms on success and the error text on failure", () => {

@@ -102,6 +102,32 @@ export function renderProfileList(el: HTMLElement, profiles: ProfileView[], cb: 
   );
 }
 
+/** Paint the "Fallback model" picker and wire it. One shared fallback across both
+ *  chains (matches buildRouter's shortcut); its presence turns on sticky fallback.
+ *  onChange gets the chosen profile id, or undefined for the "(none)" option. */
+export function renderFallbackSelect(
+  el: HTMLElement,
+  profiles: ProfileView[],
+  current: string | undefined,
+  onChange: (id: string | undefined) => void,
+): void {
+  const select = document.createElement("select");
+  select.className = "fallback";
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = "(none)";
+  select.append(none);
+  for (const p of profiles) {
+    const opt = document.createElement("option");
+    opt.value = p.id;
+    opt.textContent = p.name;
+    select.append(opt);
+  }
+  select.value = current ?? "";
+  select.addEventListener("change", () => onChange(select.value || undefined));
+  el.replaceChildren(select);
+}
+
 /** Show a profile's TTFT in ms, or the error text, in its row's result slot. */
 export function renderTestResult(row: HTMLElement, result: TestResultView): void {
   const slot = row.querySelector<HTMLElement>(".result");

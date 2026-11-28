@@ -74,7 +74,12 @@ HR audio -> VAD -> partial STT --300 ms silence--> speculative LLM request
   - Threshold: 800 ms at start, then p90 of last 20 primary TTFTs, capped at 1500 ms.
   - 3 lost races in a row -> SLOW for 5 min, backup becomes primary.
 - Prompt caching enabled on the backup profile so hedged requests stay cheap.
-- Alternative: sequential failover only. Adds the full timeout to latency. Rejected; user chose speed over cost.
+- Sticky fallback (overrides hedging on the chain when a fallback profile is set): sequential, not parallel. The primary keeps the current turn; a trigger benches it for the rest of the session (cleared only by restart).
+  - Triggers: any error, usage limit, near-limit warning from the subscription, or first token slower than the slow threshold (5 s).
+  - First token < abort threshold (10 s) -> show the primary answer this turn; if a warning was seen or TTFT > 5 s, bench and start the next turn on the fallback.
+  - No first token by 10 s, or an error -> same-turn failover to the fallback, bench the primary.
+  - Chosen for the subscription-primary case: the user wants the first answer to come from the subscription, then a clean switch, over hedging every turn.
+- Alternative: hedging for every chain. Doubles API spend on slow periods and, with a subscription primary, the fast backup wins turn 1 so the subscription is never actually used. Kept for API-only chains without a sticky fallback; sticky fallback preferred when a fallback profile is set.
 
 ### D7. Claude subscription adapter
 - Uses the locally installed Claude Code CLI logged in with Pro/Max. One warm long-lived process: `claude -p --input-format stream-json --output-format stream-json`, tools disabled, custom short system prompt.

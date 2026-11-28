@@ -20,6 +20,7 @@ function controllable() {
   const buf: IteratorResult<string>[] = [];
   const errs: unknown[] = [];
   let aborted = false;
+  let warned = false;
   const tokens: AsyncIterableIterator<string> = {
     [Symbol.asyncIterator]() {
       return this;
@@ -37,7 +38,13 @@ function controllable() {
     },
   };
   return {
-    session: { tokens, abort: () => void (aborted = true) } as StreamSession,
+    session: {
+      tokens,
+      abort: () => void (aborted = true),
+      get warned() {
+        return warned;
+      },
+    } as StreamSession,
     emit(chunk: string) {
       const r: IteratorResult<string> = { done: false, value: chunk };
       if (resolveNext) {
@@ -45,6 +52,17 @@ function controllable() {
         resolveNext = rejectNext = null;
         f(r);
       } else buf.push(r);
+    },
+    end() {
+      const r: IteratorResult<string> = { done: true, value: undefined };
+      if (resolveNext) {
+        const f = resolveNext;
+        resolveNext = rejectNext = null;
+        f(r);
+      } else buf.push(r);
+    },
+    setWarned() {
+      warned = true;
     },
     fail(err: Error) {
       if (rejectNext) {
@@ -274,5 +292,124 @@ describe("Router adaptive threshold (6.5)", () => {
     expect(b.starts).toBe(1);
     b.last.emit("hedged");
     expect((await run).source).toBe("b");
+  });
+});
+
+async function collectAll(s: AsyncIterable<string>): Promise<string[]> {
+  const out: string[] = [];
+  for await (const c of s) out.push(c);
+  return out;
+}
+
+describe("Router sticky fallback (6.10, 6.11)", () => {
+  const stickyRouter = (head: LlmAdapter, fb: LlmAdapter, timers: ManualTimers) =>
+    new Router({ fast: [head, fb], deep: [head, fb], timers, stickyFallback: true });
+
+  it("warning benches the primary for the next turn; this turn still shows it", async () => {
+    const head = fakeAdapter("sub", "claude-subscription");
+    const fb = fakeAdapter("fb");
+    const timers = new ManualTimers();
+    const r = stickyRouter(head.adapter, fb.adapter, timers);
+
+    const run1 = r.run(REQ);
+    await flush();
+    timers.advance(4000); // TTFT 4 s: under the 5 s slow and 10 s abort thresholds
+    head.last.setWarned();
+    head.last.emit("ans");
+    const res1 = await run1;
+    expect(res1.source).toBe("sub");
+    head.last.end();
+    expect(await collectAll(res1.stream)).toEqual(["ans"]); // served despite the warning
+
+    const run2 = r.run(REQ);
+    await flush();
+    expect(head.starts).toBe(1); // benched -> not retried
+    fb.last.emit("fb-ans");
+    expect((await run2).source).toBe("fb");
+  });
+
+  it("benches the primary for the next turn when its first token is slower than 5 s", async () => {
+    const head = fakeAdapter("sub", "claude-subscription");
+    const fb = fakeAdapter("fb");
+    const timers = new ManualTimers();
+    const r = stickyRouter(head.adapter, fb.adapter, timers);
+
+    const run1 = r.run(REQ);
+    await flush();
+    timers.advance(6000); // TTFT 6 s > 5 s slow threshold, still under 10 s abort
+    head.last.emit("slow");
+    const res1 = await run1;
+    expect(res1.source).toBe("sub");
+    head.last.end();
+    await collectAll(res1.stream);
+
+    const run2 = r.run(REQ);
+    await flush();
+    fb.last.emit("fb-ans");
+    expect((await run2).source).toBe("fb");
+  });
+
+  it("fails over on the same turn and benches when no token arrives by the abort threshold", async () => {
+    const head = fakeAdapter("sub", "claude-subscription");
+    const fb = fakeAdapter("fb");
+    const timers = new ManualTimers();
+    const r = stickyRouter(head.adapter, fb.adapter, timers);
+
+    const run1 = r.run(REQ);
+    await flush();
+    timers.advance(10000); // abort threshold with no primary token
+    await flush();
+    fb.last.emit("fb-ans");
+    const res1 = await run1;
+    expect(res1.source).toBe("fb");
+    expect(head.last.aborted).toBe(true);
+    expect(await firstChunk(res1.stream)).toBe("fb-ans");
+
+    const run2 = r.run(REQ); // benched: stays on the fallback next turn too
+    await flush();
+    expect(head.starts).toBe(1);
+    fb.last.emit("again");
+    expect((await run2).source).toBe("fb");
+  });
+
+  it("fails over on the same turn and benches on an error before the abort threshold", async () => {
+    const head = fakeAdapter("sub", "claude-subscription");
+    const fb = fakeAdapter("fb");
+    const timers = new ManualTimers();
+    const r = stickyRouter(head.adapter, fb.adapter, timers);
+
+    const run1 = r.run(REQ);
+    await flush();
+    head.last.fail(new AdapterError("boom")); // no timer advance -> before the threshold
+    await flush();
+    fb.last.emit("fb-ans");
+    expect((await run1).source).toBe("fb");
+
+    const run2 = r.run(REQ);
+    await flush();
+    expect(head.starts).toBe(1); // benched until restart
+    fb.last.emit("again");
+    expect((await run2).source).toBe("fb");
+  });
+
+  it("does not bench a fast, un-warned primary (hedging stays disabled on the chain)", async () => {
+    const head = fakeAdapter("sub", "claude-subscription");
+    const fb = fakeAdapter("fb");
+    const timers = new ManualTimers();
+    const r = stickyRouter(head.adapter, fb.adapter, timers);
+
+    const run1 = r.run(REQ);
+    await flush();
+    timers.advance(1000); // fast TTFT, no warning
+    head.last.emit("ok");
+    const res1 = await run1;
+    head.last.end();
+    await collectAll(res1.stream);
+    expect(fb.starts).toBe(0); // no hedge: backup never started
+
+    const run2 = r.run(REQ);
+    await flush();
+    head.last.emit("ok2");
+    expect((await run2).source).toBe("sub"); // primary kept
   });
 });

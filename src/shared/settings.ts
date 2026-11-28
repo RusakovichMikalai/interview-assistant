@@ -30,6 +30,10 @@ export interface Settings {
   language: Language;
   profiles: LlmProfile[];
   hotkeys: Hotkeys;
+  /** Profile used as the backup when the primary has problems; mandatory when a
+   *  subscription profile is primary. Its presence turns on sticky fallback
+   *  (spec 6.9). */
+  fallbackProfileId?: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -54,6 +58,7 @@ export function normalizeSettings(raw: unknown): Settings {
     language: LANGS.includes(r.language as Language) ? (r.language as Language) : DEFAULT_SETTINGS.language,
     profiles: Array.isArray(r.profiles) ? r.profiles.map(normalizeProfile) : [],
     hotkeys: { ...DEFAULT_SETTINGS.hotkeys, ...(r.hotkeys ?? {}) },
+    ...(typeof r.fallbackProfileId === "string" ? { fallbackProfileId: r.fallbackProfileId } : {}),
   };
 }
 
