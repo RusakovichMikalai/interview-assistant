@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { markerFraction, windowVisibleInCapture, type Frame, type Rgb } from "../src/main/invisibility/self-check";
+import { frameFromBgra, markerFraction, windowVisibleInCapture, type Frame, type Rgb } from "../src/main/invisibility/self-check";
 
 const MARKER: Rgb = { r: 255, g: 0, b: 255 }; // magenta the window paints
 
@@ -35,5 +35,13 @@ describe("capture self-check (8.4)", () => {
     const crop = fill(100, 100, { r: 0, g: 0, b: 0 });
     crop.rgba.set([255, 0, 255, 255], 0); // one magenta pixel out of 10000
     expect(windowVisibleInCapture(crop, MARKER)).toBe(false);
+  });
+
+  it("reorders a BGRA screen bitmap into an RGBA frame the detector reads", () => {
+    // Two magenta pixels laid out BGRA (B,G,R,A): the detector must still see RED=255.
+    const bgra = [255, 0, 255, 255, 255, 0, 255, 255];
+    const frame = frameFromBgra(2, 1, bgra);
+    expect([frame.rgba[0], frame.rgba[1], frame.rgba[2]]).toEqual([255, 0, 255]);
+    expect(markerFraction(frame, MARKER)).toBe(1);
   });
 });

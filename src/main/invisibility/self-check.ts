@@ -18,6 +18,19 @@ export interface Frame {
   rgba: Uint8ClampedArray;
 }
 
+/** Convert an OS screen bitmap - BGRA byte order, as Electron's
+ *  NativeImage.toBitmap() returns - into the RGBA Frame the detector reads. */
+export function frameFromBgra(width: number, height: number, bgra: ArrayLike<number>): Frame {
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  for (let i = 0; i < rgba.length; i += 4) {
+    rgba[i] = bgra[i + 2];
+    rgba[i + 1] = bgra[i + 1];
+    rgba[i + 2] = bgra[i];
+    rgba[i + 3] = bgra[i + 3];
+  }
+  return { width, height, rgba };
+}
+
 /** Fraction of pixels whose colour matches the marker within `tolerance` (0..1). */
 export function markerFraction(frame: Frame, marker: Rgb, tolerance = 16): number {
   const n = frame.width * frame.height;

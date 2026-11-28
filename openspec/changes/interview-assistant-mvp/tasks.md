@@ -50,15 +50,15 @@
 - [x] 7.1 Context loader for CV, vacancy, notes; included as cached prefix; verify: unit test of prompt assembly
 - [x] 7.2 Trigger modes and hotkey; `NONE` handling keeps previous hint; verify: unit tests per mode
 - [x] 7.3 Speculative start at 300 ms silence with cancel on resumed speech; verify: test with scripted VAD events
-- [ ] 7.4 Streaming bullets overlay, transcript with roles, history, session delete; verify: UI test and test that delete removes files
+- [x] 7.4 Streaming bullets overlay, transcript with roles, history, session delete; verify: UI test and test that delete removes files
 - [x] 7.5 End-to-end latency metric (end of HR speech -> first token on screen) logged per hint; verify: p50 within 1.8 s on reference setup
 
 ## 8. Capture invisibility
 
-- [ ] 8.1 Hide toggle and hotkey with `setContentProtection`, state shown in window; disabled with message on Linux; verify: manual share test on Windows and macOS
+- [x] 8.1 Hide toggle and hotkey with `setContentProtection`, state shown in window; disabled with message on Linux; verify: manual share test on Windows and macOS
 - [ ] 8.2 Skip taskbar, switcher hiding, always on top, click-through, opacity; verify: manual check per OS
 - [ ] 8.3 Focus-free global hotkeys for all in-session actions; verify: manual test that call window keeps focus
-- [ ] 8.4 Self-check via screen capture and pixel diff; verify: test reports visible when protection is off
+- [x] 8.4 Self-check via screen capture and pixel diff; verify: test reports visible when protection is off
 
 ## 9. Pairing (HOST / VIEWER)
 
