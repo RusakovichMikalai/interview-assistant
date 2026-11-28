@@ -74,7 +74,7 @@
 
 ## 10. VIEWER-SOLO
 
-- [ ] 10.1 Diarization on single mixed input and one-click "Me" mapping; verify: test on a two-speaker recording
+- [x] 10.1 Diarization on single mixed input and one-click "Me" mapping; verify: test on a two-speaker recording
 
 ## 11. Integration
 
