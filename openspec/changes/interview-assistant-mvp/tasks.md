@@ -25,7 +25,7 @@
 - [ ] 4.2 Native capture for macOS (Process Taps, ScreenCaptureKit fallback) and mic; verify: same WAV test on macOS 14 and 15
 - [ ] 4.3 Linux capture from PipeWire/Pulse monitor source and mic; verify: same WAV test on Ubuntu
 - [ ] 4.4 AEC on mic channel with loopback reference; verify: speaker playback test, interviewer speech not transcribed as "Me"
-- [ ] 4.5 Pre-interview check with level meters and silent-channel warning; verify: unit test for silence detection, manual UI check
+- [x] 4.5 Pre-interview check with level meters and silent-channel warning; verify: unit test for silence detection, manual UI check
 
 ## 5. Speech recognition
 

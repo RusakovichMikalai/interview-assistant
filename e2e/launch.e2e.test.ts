@@ -44,6 +44,14 @@ it("paints the provider-profile add row with the preset choices", async () => {
   expect(await page.locator("#profiles-add button.add").textContent()).toBe("Add");
 });
 
+// Task 4.5: the pre-interview check must paint a level meter per channel and,
+// before any capture, warn that both channels are silent, naming the device.
+it("paints the audio-check meters and silent-channel warnings", async () => {
+  await expect.poll(() => page.locator("#precheck-meters .meter").count()).toBe(2);
+  expect(await page.locator("#precheck-warnings .warning").count()).toBe(2);
+  expect(await page.locator("#precheck-warnings").textContent()).toMatch(/System audio is not captured/);
+});
+
 it("screenshots the launched window", async () => {
   const shot = resolve(__dirname, "screenshots", "launch.png");
   mkdirSync(dirname(shot), { recursive: true });
